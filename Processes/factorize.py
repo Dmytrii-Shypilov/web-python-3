@@ -20,7 +20,7 @@ def factorize(number):
 if __name__ == "__main__":
     numbers = [128, 255, 99999, 10651060]
 
-    # SINCHRONOUS
+    # SYNCHRONOUS
     sync_start = time()
     final_list = []
 
