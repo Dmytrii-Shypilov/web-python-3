@@ -2,7 +2,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from threading import Thread, RLock
+from threading import Thread
 
 
 FILES_DATA = {
@@ -23,12 +23,8 @@ for a, b in zip(CYRILLIC_SYMBOLS, TRANSLATION):
     TRANS[ord(a)] = b
     TRANS[ord(a.upper())] = b.upper()
 
-logging.basicConfig(level=logging.DEBUG, format='%(threadName)s %(asctime)s %(message)s')
-lock = RLock()
-
 
 def normalize(name):
-    logging.debug(f"Normalizing {name}")
     if len(name.split('.')) == 1:
         prefix = list(name)
         format = ''
@@ -52,67 +48,68 @@ def create_folder(path, name):
     os.makedirs(f"{path}\\{name}", exist_ok=True)
 
 
-def handle_archives(file, path, type, locker):
-    with locker:
-        logging.debug(f"Handling archive {file.name}")
+def handle_archives(file, path, type):
+    logging.debug(f"Handling archive {file.name}")
+    normalized_name = normalize(file.name)
+    archive_name = normalized_name.split('.')[0]
+    shutil.unpack_archive(f"{path}\\{file.name}",
+                          f"{path}\\{type}\\{archive_name}")
+    shutil.move(f"{path}\\{file.name}", f"{path}\\{type}\\{archive_name}")
+
+
+def handle_files(file, path, type):
+    logging.debug(f"Handling file {file.name}")
+    normalized_name = normalize(file.name)
+    shutil.move(f"{path}\\{file.name}",
+                f"{path}\\{type}\\{normalized_name}")
+
+
+def handle_folder(file, path):
+    logging.debug(f"Handling folder {file.name}")
+    if len(os.listdir(file)) == 0:
+        os.rmdir(file)
+    if file.name not in FILES_DATA and file.exists():
         normalized_name = normalize(file.name)
-        archive_name = normalized_name.split('.')[0]
-        shutil.unpack_archive(f"{path}\\{file.name}",
-                                f"{path}\\{type}\\{archive_name}")
-        shutil.move(f"{path}\\{file.name}", f"{path}\\{type}\\{archive_name}")
-
-
-def handle_files(file, path, type, locker):
-    with locker:
-        logging.debug(f"Handling file {file.name}")
-        normalized_name = normalize(file.name)
-        shutil.move(f"{path}\\{file.name}",
-                    f"{path}\\{type}\\{normalized_name}")
-
-
-def handle_folder(file, path, locker):
-    with locker:
-        logging.debug(f"Handling folder {file.name}")
-        if len(os.listdir(file)) == 0:
-            os.rmdir(file)
-        if file.name not in FILES_DATA and file.exists():
-            normalized_name = normalize(file.name)
-            os.rename(file, f"{path}\\{normalized_name}")
-            new_folder_name =  f"{path}\\{normalized_name}"
-            sort_folder(new_folder_name)
-
-
-def launchThread(worker, file, path, type, locker):
-    if worker.__name__ == "handle_folder":
-        thread = Thread(target=worker, args=(file, path, locker))
-    else:
-        thread = Thread(target=worker, args=(file, path, type, locker))
-    thread.start()
+        os.rename(file, f"{path}\\{normalized_name}")
+        new_folder_name = f"{path}\\{normalized_name}"
+        sort_folder(new_folder_name)
 
 
 def sort_folder(folder_path):
     path = Path(folder_path)
+    threads = []
 
     for file in path.iterdir():
 
         for type in FILES_DATA:
             if file.name.split('.')[-1].lower() in FILES_DATA[type]:
-                create_folder(path, type)  # here should be a thread launched
+                create_folder(path, type)
                 if type == "archives":
-                    launchThread(handle_archives, file, path, type, lock)
-                    # handle_archives(file, path, type)
+                    thread = Thread(target=handle_archives,
+                                    args=(file, path, type))
                 else:
-                    launchThread(handle_files, file, path, type, lock)
-                    # handle_files(file, path, type)
+                    thread = Thread(target=handle_files,
+                                    args=(file, path, type))
+                thread.start()
+                threads.append(thread)
         if file.is_dir():
-            launchThread(handle_folder, file, path, type, lock)
-            # handle_folder(file, path)
+            thread = Thread(target=handle_folder, args=(file, path))
+            thread.start()
+            threads.append(thread)
+
+        for thread in threads:
+            thread.join()
 
 
-try:
-    directory = input("Enter your folder destination: ")
-    sort_folder(directory)
-except FileNotFoundError:
-    print("This folder doesn't exist. Enter the correct path, please.")
+if __name__ == "__main__":
 
-logging.debug("=====>>>> Main thread finished")
+    logging.basicConfig(level=logging.DEBUG,
+                        format='%(threadName)s %(asctime)s %(message)s')
+
+    try:
+        directory = input("Enter your folder destination: ")
+        sort_folder(directory)
+    except FileNotFoundError:
+        print("This folder doesn't exist. Enter the correct path, please.")
+
+    logging.debug("=====>>>> Folder has been sorted")
